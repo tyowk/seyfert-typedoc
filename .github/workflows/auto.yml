@@ -1,0 +1,109 @@
+name: Auto Deploy
+
+on:
+  schedule:
+    - cron: 0 0 * * *
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+
+    env:
+      TARGET_REPO: "tiramisulabs/seyfert"
+
+    steps:
+      - name: Checkout repo kamu sendiri
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Clone repo target
+        run: |
+          git clone https://github.com/${{ env.TARGET_REPO }}.git target-repo
+
+      - name: Ambil commit SHA terbaru dari repo target
+        id: get-sha
+        run: |
+          LATEST_SHA=$(git -C target-repo rev-parse HEAD)
+          echo "latest_sha=$LATEST_SHA" >> $GITHUB_OUTPUT
+          echo "Latest SHA: $LATEST_SHA"
+
+      - name: Baca SHA yang tersimpan sebelumnya
+        id: read-cache
+        run: |
+          if [ -f .last-sha ]; then
+            echo "cached_sha=$(cat .last-sha)" >> $GITHUB_OUTPUT
+          else
+            echo "cached_sha=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cek apakah ada update
+        id: check-update
+        run: |
+          if [ "${{ steps.get-sha.outputs.latest_sha }}" != "${{ steps.read-cache.outputs.cached_sha }}" ]; then
+            echo "has_update=true" >> $GITHUB_OUTPUT
+            echo "✅ Ada update! Lanjut generate docs..."
+          else
+            echo "has_update=false" >> $GITHUB_OUTPUT
+            echo "⏭️ Tidak ada perubahan. Skip."
+          fi
+          
+      - name: Install dependencies repo target
+        if: steps.check-update.outputs.has_update == 'true'
+        run: |
+          cd target-repo
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Install TypeDoc & plugin
+        if: steps.check-update.outputs.has_update == 'true'
+        run: |
+          cd target-repo
+          npm install --save-dev typedoc typedoc-material-theme
+
+      - name: Generate docs
+        if: steps.check-update.outputs.has_update == 'true'
+        run: |
+          cd target-repo
+          npx typedoc --entryPoints src/index.ts --plugin typedoc-material-theme --out ../docs-output
+
+      - name: Simpan SHA ke cache
+        if: steps.check-update.outputs.has_update == 'true'
+        run: echo "${{ steps.get-sha.outputs.latest_sha }}" > .last-sha
+
+      - name: Commit cache SHA ke main
+        if: steps.check-update.outputs.has_update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .last-sha
+          git commit -m "chore: update SHA cache @ ${{ steps.get-sha.outputs.latest_sha }}"
+          git push origin main
+
+      - name: Push docs ke branch gh-pages
+        if: steps.check-update.outputs.has_update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Fetch branch gh-pages kalau sudah ada
+          git fetch origin gh-pages 2>/dev/null || true
+
+          # Buat orphan branch baru yang bersih
+          git checkout --orphan gh-pages-new
+          git rm -rf . --quiet
+
+          # Salin hasil docs ke root
+          cp -r docs-output/. .
+          rm -rf docs-output
+
+          # Commit & force push ke gh-pages
+          git add -A
+          git commit -m "docs: auto-update dari ${{ env.TARGET_REPO }} @ ${{ steps.get-sha.outputs.latest_sha }}"
+          git push origin gh-pages-new:gh-pages --force
