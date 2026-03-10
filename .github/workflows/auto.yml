@@ -89,31 +89,11 @@ jobs:
           git commit -m "chore: update SHA cache @ ${{ steps.get-sha.outputs.latest_sha }}"
           git push origin main
 
-      - name: Push docs to gh-pages
-        if: steps.check-update.outputs.has_update == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin gh-pages 2>/dev/null || true
-          git checkout --orphan gh-pages-tmp
-          git rm -rf . --quiet
-          cp -r docs-output/. .
-          rm -rf docs-output target-repo
-          git add -A
-          git commit -m "docs: auto-update from ${{ env.TARGET_REPO }} @ ${{ steps.get-sha.outputs.latest_sha }}"
-          git push origin gh-pages-tmp:gh-pages --force
-
-      - name: Checkout gh-pages for upload
-        if: steps.check-update.outputs.has_update == 'true'
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-
       - name: Upload pages artifact
         if: steps.check-update.outputs.has_update == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: ./docs-output
 
       - name: Deploy to GitHub Pages
         if: steps.check-update.outputs.has_update == 'true'
