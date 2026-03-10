@@ -85,8 +85,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          cp -r docs-output ./docs
-          git add .last-sha docs/
+          git add .last-sha
           git commit -m "chore: update docs & SHA cache @ ${{ steps.get-sha.outputs.latest_sha }}"
           git push origin main
 
