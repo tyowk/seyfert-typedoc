@@ -10,16 +10,23 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
-  check-and-build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
       TARGET_REPO: "tiramisulabs/seyfert"
-
     steps:
-      - name: Checkout repo kamu sendiri
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -27,18 +34,16 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Clone repo target
-        run: |
-          git clone https://github.com/${{ env.TARGET_REPO }}.git target-repo
+      - name: Clone target repository
+        run: git clone https://github.com/${{ env.TARGET_REPO }}.git target-repo
 
-      - name: Ambil commit SHA terbaru dari repo target
+      - name: Get latest commit SHA
         id: get-sha
         run: |
           LATEST_SHA=$(git -C target-repo rev-parse HEAD)
           echo "latest_sha=$LATEST_SHA" >> $GITHUB_OUTPUT
-          echo "Latest SHA: $LATEST_SHA"
 
-      - name: Baca SHA yang tersimpan sebelumnya
+      - name: Read cached SHA
         id: read-cache
         run: |
           if [ -f .last-sha ]; then
@@ -47,24 +52,22 @@ jobs:
             echo "cached_sha=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Cek apakah ada update
+      - name: Check for updates
         id: check-update
         run: |
           if [ "${{ steps.get-sha.outputs.latest_sha }}" != "${{ steps.read-cache.outputs.cached_sha }}" ]; then
             echo "has_update=true" >> $GITHUB_OUTPUT
-            echo "✅ Ada update! Lanjut generate docs..."
           else
             echo "has_update=false" >> $GITHUB_OUTPUT
-            echo "⏭️ Tidak ada perubahan. Skip."
           fi
-          
-      - name: Install dependencies repo target
+
+      - name: Install target repo dependencies
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           cd target-repo
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Install TypeDoc & plugin
+      - name: Install TypeDoc and plugin
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           cd target-repo
@@ -76,37 +79,43 @@ jobs:
           cd target-repo
           npx typedoc --entryPoints src/index.ts --plugin typedoc-material-theme --out ../docs-output
 
-      - name: Simpan SHA ke cache
-        if: steps.check-update.outputs.has_update == 'true'
-        run: echo "${{ steps.get-sha.outputs.latest_sha }}" > .last-sha
-
-      - name: Commit cache SHA ke main
+      - name: Save SHA and push to main
         if: steps.check-update.outputs.has_update == 'true'
         run: |
+          echo "${{ steps.get-sha.outputs.latest_sha }}" > .last-sha
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .last-sha
-          git commit -m "chore: update docs & SHA cache @ ${{ steps.get-sha.outputs.latest_sha }}"
+          git commit -m "chore: update SHA cache @ ${{ steps.get-sha.outputs.latest_sha }}"
           git push origin main
 
-      - name: Push docs ke branch gh-pages
+      - name: Push docs to gh-pages
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Fetch branch gh-pages kalau sudah ada
           git fetch origin gh-pages 2>/dev/null || true
-
-          # Buat orphan branch baru yang bersih
-          git checkout --orphan gh-pages-new
+          git checkout --orphan gh-pages-tmp
           git rm -rf . --quiet
-
-          # Salin hasil docs ke root
           cp -r docs-output/. .
-          rm -rf docs-output
-
-          # Commit & force push ke gh-pages
+          rm -rf docs-output target-repo
           git add -A
-          git commit -m "docs: auto-update dari ${{ env.TARGET_REPO }} @ ${{ steps.get-sha.outputs.latest_sha }}"
-          git push origin gh-pages-new:gh-pages --force
+          git commit -m "docs: auto-update from ${{ env.TARGET_REPO }} @ ${{ steps.get-sha.outputs.latest_sha }}"
+          git push origin gh-pages-tmp:gh-pages --force
+
+      - name: Checkout gh-pages for upload
+        if: steps.check-update.outputs.has_update == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Upload pages artifact
+        if: steps.check-update.outputs.has_update == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy to GitHub Pages
+        if: steps.check-update.outputs.has_update == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
