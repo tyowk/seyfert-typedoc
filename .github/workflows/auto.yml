@@ -71,17 +71,12 @@ jobs:
           cd target-repo
           pnpm install --frozen-lockfile
 
-      - name: Install TypeDoc and plugin
+      - name: Install TypeDoc
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           cd target-repo
-          pnpm add -D typedoc typedoc-material-theme
-
-      - name: Generate docs
-        if: steps.check-update.outputs.has_update == 'true'
-        run: |
-          cd target-repo
-          pnpm exec typedoc \
+          pnpm exec typedoc --version || pnpm dlx typedoc --version
+          pnpm dlx typedoc \
             --entryPoints src/index.ts \
             --plugin typedoc-material-theme \
             --out ../docs-output
@@ -93,7 +88,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .last-sha
-          git commit -m "chore: update SHA cache @ ${{ steps.get-sha.outputs.latest_sha }}"
+          git diff --cached --quiet || git commit -m "chore: update SHA cache @ ${{ steps.get-sha.outputs.latest_sha }}"
           git push origin main
 
       - name: Upload pages artifact
