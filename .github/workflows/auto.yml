@@ -1,11 +1,8 @@
 name: Auto Deploy
 
 on:
-  # push:
-    # branches:
-      # - main
   schedule:
-    - cron: 0 0 * * *
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 permissions:
@@ -25,6 +22,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     env:
       TARGET_REPO: "tiramisulabs/seyfert"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,6 +32,12 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
       - name: Clone target repository
         run: git clone https://github.com/${{ env.TARGET_REPO }}.git target-repo
 
@@ -41,43 +45,46 @@ jobs:
         id: get-sha
         run: |
           LATEST_SHA=$(git -C target-repo rev-parse HEAD)
-          echo "latest_sha=$LATEST_SHA" >> $GITHUB_OUTPUT
+          echo "latest_sha=$LATEST_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Read cached SHA
         id: read-cache
         run: |
           if [ -f .last-sha ]; then
-            echo "cached_sha=$(cat .last-sha)" >> $GITHUB_OUTPUT
+            echo "cached_sha=$(cat .last-sha)" >> "$GITHUB_OUTPUT"
           else
-            echo "cached_sha=" >> $GITHUB_OUTPUT
+            echo "cached_sha=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Check for updates
         id: check-update
         run: |
           if [ "${{ steps.get-sha.outputs.latest_sha }}" != "${{ steps.read-cache.outputs.cached_sha }}" ]; then
-            echo "has_update=true" >> $GITHUB_OUTPUT
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_update=false" >> $GITHUB_OUTPUT
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install target repo dependencies
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           cd target-repo
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          pnpm install --frozen-lockfile
 
       - name: Install TypeDoc and plugin
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           cd target-repo
-          npm install --save-dev typedoc typedoc-material-theme
+          pnpm add -D typedoc typedoc-material-theme
 
       - name: Generate docs
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           cd target-repo
-          npx typedoc --entryPoints src/index.ts --plugin typedoc-material-theme --out ../docs-output
+          pnpm exec typedoc \
+            --entryPoints src/index.ts \
+            --plugin typedoc-material-theme \
+            --out ../docs-output
 
       - name: Save SHA and push to main
         if: steps.check-update.outputs.has_update == 'true'
