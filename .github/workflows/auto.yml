@@ -71,12 +71,11 @@ jobs:
           cd target-repo
           pnpm install --frozen-lockfile
 
-      - name: Install TypeDoc
+      - name: Generate docs with TypeDoc
         if: steps.check-update.outputs.has_update == 'true'
         run: |
           cd target-repo
-          pnpm exec typedoc --version || pnpm dlx typedoc --version
-          pnpm dlx typedoc \
+          pnpm dlx --package typedoc --package typedoc-material-theme typedoc \
             --entryPoints src/index.ts \
             --plugin typedoc-material-theme \
             --out ../docs-output
